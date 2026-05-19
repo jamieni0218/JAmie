@@ -1,0 +1,510 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar
+} from 'recharts';
+import {
+  Activity, Droplet, Moon, Scale, Utensils, CalendarDays, Plus, TrendingUp, Save, CheckCircle, Trash2
+} from 'lucide-react';
+
+// --- Constants & Initial Data ---
+const TABS = {
+  DAILY: 'daily',
+  MONTHLY: 'monthly'
+};
+
+const METRICS = {
+  SLEEP: { id: 'sleep', label: '睡眠時間', unit: '小時', icon: Moon, color: '#8b5cf6' },
+  WEIGHT: { id: 'weight', label: '體重', unit: '公斤', icon: Scale, color: '#f59e0b' },
+  WATER: { id: 'water', label: '喝水量', unit: '毫升', icon: Droplet, color: '#3b82f6' },
+  EXERCISE: { id: 'exercise', label: '運動時間', unit: '分鐘', icon: Activity, color: '#10b981' },
+  CALORIES: { id: 'calories', label: '攝取熱量', unit: '大卡', icon: Utensils, color: '#ef4444' }
+};
+
+// Generate some mock data for the current month
+const generateMockData = () => {
+  const data = {};
+  const today = new Date();
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+
+  for (let i = 1; i <= daysInMonth; i++) {
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+    // Only generate data up to today to make it realistic
+    if (i <= today.getDate()) {
+      const breakfastCal = Math.floor(Math.random() * 400 + 200);
+      const lunchCal = Math.floor(Math.random() * 600 + 400);
+      const dinnerCal = Math.floor(Math.random() * 800 + 500);
+      
+      data[dateStr] = {
+        sleep: parseFloat((Math.random() * (9 - 5) + 5).toFixed(1)), // 5-9 hours
+        weight: parseFloat((Math.random() * (72 - 68) + 68).toFixed(1)), // 68-72 kg
+        water: Math.floor(Math.random() * (3000 - 1000) + 1000), // 1000-3000 ml
+        exercise: Math.floor(Math.random() * (120 - 0) + 0), // 0-120 mins
+        calorieGoal: 2000,
+        meals: [
+          { id: Date.now() + i + 1, name: '早餐', calories: breakfastCal },
+          { id: Date.now() + i + 2, name: '午餐', calories: lunchCal },
+          { id: Date.now() + i + 3, name: '晚餐', calories: dinnerCal }
+        ]
+      };
+    } else {
+      // Future days are null
+      data[dateStr] = { sleep: null, weight: null, water: null, exercise: null, calorieGoal: 2000, meals: [] };
+    }
+  }
+  return data;
+};
+
+export default function HealthTrackerApp() {
+  const [activeTab, setActiveTab] = useState(TABS.DAILY);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [healthData, setHealthData] = useState(() => generateMockData());
+  
+  // State for daily input form
+  const [dailyInput, setDailyInput] = useState({
+    sleep: '', weight: '', water: '', exercise: '', calorieGoal: 2000, meals: []
+  });
+  
+  const [newMeal, setNewMeal] = useState({ name: '', calories: '' });
+  const [saveStatus, setSaveStatus] = useState(null);
+
+  // Update input form when selected date changes
+  useEffect(() => {
+    const dataForDate = healthData[selectedDate];
+    if (dataForDate && dataForDate.sleep !== null) {
+      setDailyInput({
+        sleep: dataForDate.sleep || '',
+        weight: dataForDate.weight || '',
+        water: dataForDate.water || '',
+        exercise: dataForDate.exercise || '',
+        calorieGoal: dataForDate.calorieGoal || 2000,
+        meals: dataForDate.meals || []
+      });
+    } else {
+      setDailyInput({ sleep: '', weight: '', water: '', exercise: '', calorieGoal: 2000, meals: [] });
+    }
+    setNewMeal({ name: '', calories: '' });
+    setSaveStatus(null);
+  }, [selectedDate, healthData]);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setDailyInput(prev => ({ ...prev, [name]: value }));
+    setSaveStatus(null);
+  };
+
+  const handleAddMeal = () => {
+    if (!newMeal.name || !newMeal.calories) return;
+    setDailyInput(prev => ({
+      ...prev,
+      meals: [...prev.meals, { id: Date.now(), name: newMeal.name, calories: parseInt(newMeal.calories, 10) }]
+    }));
+    setNewMeal({ name: '', calories: '' });
+    setSaveStatus(null);
+  };
+
+  const handleRemoveMeal = (id) => {
+    setDailyInput(prev => ({
+      ...prev,
+      meals: prev.meals.filter(m => m.id !== id)
+    }));
+    setSaveStatus(null);
+  };
+
+  const handleSaveDailyData = (e) => {
+    e.preventDefault();
+    
+    // Parse inputs, convert to numbers or null
+    const parsedData = {
+      sleep: dailyInput.sleep !== '' ? parseFloat(dailyInput.sleep) : null,
+      weight: dailyInput.weight !== '' ? parseFloat(dailyInput.weight) : null,
+      water: dailyInput.water !== '' ? parseInt(dailyInput.water, 10) : null,
+      exercise: dailyInput.exercise !== '' ? parseInt(dailyInput.exercise, 10) : null,
+      calorieGoal: parseInt(dailyInput.calorieGoal, 10) || 2000,
+      meals: dailyInput.meals
+    };
+
+    setHealthData(prev => ({
+      ...prev,
+      [selectedDate]: parsedData
+    }));
+    
+    setSaveStatus('success');
+    setTimeout(() => setSaveStatus(null), 3000);
+  };
+
+  // --- Monthly Stats Calculation ---
+  const monthlyStats = useMemo(() => {
+    const currentMonthPrefix = selectedDate.substring(0, 7); // e.g., "2026-05"
+    
+    // Filter data for the current selected month
+    const currentMonthData = Object.entries(healthData)
+      .filter(([date, data]) => date.startsWith(currentMonthPrefix) && data.sleep !== null) // basic check if day has data
+      .map(([date, data]) => {
+        // Calculate total calories from meals for charting
+        const totalCalories = (data.meals || []).reduce((sum, meal) => sum + meal.calories, 0);
+        return { date, ...data, calories: totalCalories };
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    // Calculate averages
+    const sums = { sleep: 0, weight: 0, water: 0, exercise: 0, calories: 0 };
+    const counts = { sleep: 0, weight: 0, water: 0, exercise: 0, calories: 0 };
+
+    currentMonthData.forEach(day => {
+      Object.keys(METRICS).forEach(key => {
+        const metricId = METRICS[key].id;
+        if (day[metricId] !== null && day[metricId] !== undefined) {
+          sums[metricId] += day[metricId];
+          counts[metricId]++;
+        }
+      });
+    });
+
+    const averages = {};
+    Object.keys(METRICS).forEach(key => {
+      const metricId = METRICS[key].id;
+      averages[metricId] = counts[metricId] > 0 ? (sums[metricId] / counts[metricId]).toFixed(1) : 0;
+    });
+
+    return { chartData: currentMonthData, averages };
+  }, [healthData, selectedDate]);
+
+
+  return (
+    <div className="min-h-screen bg-pink-50 text-gray-800 font-sans">
+      {/* Header */}
+      <header className="bg-white shadow-sm sticky top-0 z-10">
+        <div className="max-w-md mx-auto px-4 py-4 flex justify-between items-center">
+          <h1 className="text-xl font-bold text-pink-600 flex items-center gap-2">
+            <Activity className="w-6 h-6" />
+            健康捕手
+          </h1>
+          <input 
+            type="date" 
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="text-sm border-gray-300 rounded-md shadow-sm focus:border-pink-300 focus:ring focus:ring-pink-200 focus:ring-opacity-50 px-2 py-1"
+          />
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="max-w-md mx-auto pb-24">
+        {activeTab === TABS.DAILY ? (
+          <DailyInputView 
+            selectedDate={selectedDate} 
+            dailyInput={dailyInput} 
+            handleInputChange={handleInputChange} 
+            handleSave={handleSaveDailyData}
+            saveStatus={saveStatus}
+            newMeal={newMeal}
+            setNewMeal={setNewMeal}
+            handleAddMeal={handleAddMeal}
+            handleRemoveMeal={handleRemoveMeal}
+          />
+        ) : (
+          <MonthlyStatsView 
+            stats={monthlyStats} 
+            selectedDate={selectedDate}
+          />
+        )}
+      </main>
+
+      {/* Bottom Navigation */}
+      <nav className="fixed bottom-0 w-full bg-white border-t border-gray-200 safe-area-pb">
+        <div className="max-w-md mx-auto flex justify-around">
+          <button
+            onClick={() => setActiveTab(TABS.DAILY)}
+            className={`flex-1 py-3 flex flex-col items-center justify-center gap-1 transition-colors ${
+              activeTab === TABS.DAILY ? 'text-pink-600 font-medium' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <CalendarDays className="w-5 h-5" />
+            <span className="text-xs">今日紀錄</span>
+          </button>
+          <button
+            onClick={() => setActiveTab(TABS.MONTHLY)}
+            className={`flex-1 py-3 flex flex-col items-center justify-center gap-1 transition-colors ${
+              activeTab === TABS.MONTHLY ? 'text-pink-600 font-medium' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <TrendingUp className="w-5 h-5" />
+            <span className="text-xs">月度統計</span>
+          </button>
+        </div>
+      </nav>
+    </div>
+  );
+}
+
+// --- Daily Input View Component ---
+function DailyInputView({ selectedDate, dailyInput, handleInputChange, handleSave, saveStatus, newMeal, setNewMeal, handleAddMeal, handleRemoveMeal }) {
+  const isToday = selectedDate === new Date().toISOString().split('T')[0];
+  const dateDisplay = isToday ? '今天' : selectedDate;
+
+  // Calculate calorie statistics
+  const totalConsumed = dailyInput.meals.reduce((sum, meal) => sum + meal.calories, 0);
+  const remainingCalories = dailyInput.calorieGoal - totalConsumed;
+
+  return (
+    <div className="p-4 space-y-6 animate-in fade-in duration-300">
+      <div className="text-center mb-6">
+        <h2 className="text-2xl font-bold text-gray-800">{dateDisplay} 的健康紀錄</h2>
+        <p className="text-gray-500 text-sm">持續紀錄，看見自己的進步</p>
+      </div>
+
+      <form onSubmit={handleSave} className="space-y-4">
+        {Object.values(METRICS).filter(m => m.id !== 'calories').map((metric) => (
+          <div key={metric.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 transition-transform hover:-translate-y-1">
+            <div className="p-3 rounded-full" style={{ backgroundColor: `${metric.color}20`, color: metric.color }}>
+              <metric.icon className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <label htmlFor={metric.id} className="block text-sm font-medium text-gray-700 mb-1">
+                {metric.label} ({metric.unit})
+              </label>
+              <input
+                type="number"
+                id={metric.id}
+                name={metric.id}
+                value={dailyInput[metric.id]}
+                onChange={handleInputChange}
+                step="any"
+                min="0"
+                placeholder={`輸入${metric.label}...`}
+                className="w-full text-lg border-b-2 border-gray-200 focus:border-pink-500 focus:outline-none py-1 bg-transparent transition-colors"
+              />
+            </div>
+          </div>
+        ))}
+
+        {/* Diet & Calories Section */}
+        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 space-y-4">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-2 rounded-full bg-red-50 text-red-500">
+              <Utensils className="w-5 h-5" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-800">飲食與熱量紀錄</h3>
+          </div>
+
+          {/* Calorie Goals & Summary */}
+          <div className="grid grid-cols-3 gap-2 text-center bg-pink-50/50 p-3 rounded-lg">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">每日目標</label>
+              <input 
+                type="number" 
+                name="calorieGoal"
+                value={dailyInput.calorieGoal}
+                onChange={handleInputChange}
+                className="w-full text-center font-bold text-gray-800 bg-transparent border-b border-gray-300 focus:outline-none focus:border-pink-500"
+              />
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 mb-1">已攝取</div>
+              <div className="font-bold text-gray-800">{totalConsumed}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 mb-1">剩餘可攝取</div>
+              <div className={`font-bold ${remainingCalories < 0 ? 'text-red-500' : 'text-pink-600'}`}>
+                {remainingCalories}
+              </div>
+            </div>
+          </div>
+
+          {/* Meal List */}
+          {dailyInput.meals.length > 0 && (
+            <div className="space-y-2 mt-4">
+              {dailyInput.meals.map((meal) => (
+                <div key={meal.id} className="flex justify-between items-center bg-pink-50/50 px-3 py-2 rounded-md border border-pink-100">
+                  <span className="text-gray-700 font-medium">{meal.name}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-gray-600">{meal.calories} 大卡</span>
+                    <button 
+                      type="button" 
+                      onClick={() => handleRemoveMeal(meal.id)}
+                      className="text-red-400 hover:text-red-600 p-1 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add Meal Form */}
+          <div className="flex gap-2 mt-2">
+            <input 
+              type="text"
+              placeholder="餐點名稱 (如: 排骨便當)"
+              value={newMeal.name}
+              onChange={(e) => setNewMeal(prev => ({...prev, name: e.target.value}))}
+              className="flex-1 text-sm border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:border-red-300"
+            />
+            <input 
+              type="number"
+              placeholder="大卡"
+              value={newMeal.calories}
+              onChange={(e) => setNewMeal(prev => ({...prev, calories: e.target.value}))}
+              className="w-20 text-sm border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:border-red-300"
+            />
+            <button 
+              type="button"
+              onClick={handleAddMeal}
+              className="bg-red-50 text-red-500 p-2 rounded-md hover:bg-red-100 transition-colors"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="pt-6 pb-4 sticky bottom-20 bg-pink-50 z-10">
+          <button
+            type="submit"
+            className="w-full bg-pink-600 text-white font-bold py-3 px-4 rounded-xl shadow-md hover:bg-pink-700 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:ring-opacity-50 transition-all flex justify-center items-center gap-2 active:scale-95"
+          >
+            {saveStatus === 'success' ? (
+              <>
+                <CheckCircle className="w-5 h-5 animate-pulse" />
+                <span>儲存成功！</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-5 h-5" />
+                <span>儲存今日紀錄</span>
+              </>
+            )}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// --- Monthly Stats View Component ---
+function MonthlyStatsView({ stats, selectedDate }) {
+  const displayMonth = selectedDate.substring(0, 7).replace('-', '年 ') + '月';
+  const { chartData, averages } = stats;
+
+  if (chartData.length === 0) {
+    return (
+      <div className="p-8 text-center text-gray-500 flex flex-col items-center justify-center min-h-[60vh]">
+        <Activity className="w-12 h-12 mb-4 text-gray-300" />
+        <p className="text-lg font-medium">{displayMonth} 目前還沒有紀錄喔！</p>
+        <p className="text-sm mt-2">回到「今日紀錄」開始追蹤您的健康吧。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 space-y-8 animate-in fade-in duration-300">
+      <div className="text-center">
+        <h2 className="text-2xl font-bold text-gray-800">{displayMonth} 統計報告</h2>
+        <p className="text-gray-500 text-sm">檢視您的長期健康趨勢</p>
+      </div>
+
+      {/* Averages Cards */}
+      <div className="grid grid-cols-2 gap-3">
+        {Object.values(METRICS).map((metric) => (
+          <div key={`avg-${metric.id}`} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
+            <metric.icon className="w-5 h-5 mb-2" style={{ color: metric.color }} />
+            <span className="text-xs text-gray-500">{metric.label}平均</span>
+            <div className="mt-1 flex items-baseline gap-1">
+              <span className="text-xl font-bold text-gray-800">{averages[metric.id]}</span>
+              <span className="text-xs text-gray-500">{metric.unit}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Charts Section */}
+      <div className="space-y-8">
+        <ChartSection 
+          title="體重趨勢 (kg)" 
+          data={chartData} 
+          dataKey="weight" 
+          color={METRICS.WEIGHT.color} 
+          icon={METRICS.WEIGHT.icon}
+          domain={['dataMin - 2', 'dataMax + 2']} // Zoom in on weight changes
+        />
+        <ChartSection 
+          title="睡眠時間 (小時)" 
+          data={chartData} 
+          dataKey="sleep" 
+          color={METRICS.SLEEP.color} 
+          icon={METRICS.SLEEP.icon}
+        />
+        <ChartSection 
+          title="每日喝水量 (ml)" 
+          data={chartData} 
+          dataKey="water" 
+          color={METRICS.WATER.color} 
+          icon={METRICS.WATER.icon}
+          chartType="bar"
+        />
+        <ChartSection 
+          title="攝取熱量 (kcal)" 
+          data={chartData} 
+          dataKey="calories" 
+          color={METRICS.CALORIES.color} 
+          icon={METRICS.CALORIES.icon}
+          chartType="bar"
+        />
+        <ChartSection 
+          title="運動時間 (分鐘)" 
+          data={chartData} 
+          dataKey="exercise" 
+          color={METRICS.EXERCISE.color} 
+          icon={METRICS.EXERCISE.icon}
+          chartType="bar"
+        />
+      </div>
+    </div>
+  );
+}
+
+// --- Reusable Chart Component ---
+function ChartSection({ title, data, dataKey, color, icon: Icon, chartType = 'line', domain = ['auto', 'auto'] }) {
+  // Format date for X-axis (e.g., "05/12" from "2026-05-12")
+  const formatXAxis = (tickItem) => {
+    const parts = tickItem.split('-');
+    return `${parts[1]}/${parts[2]}`;
+  };
+
+  return (
+    <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+      <div className="flex items-center gap-2 mb-4">
+        <Icon className="w-5 h-5" style={{ color }} />
+        <h3 className="text-lg font-semibold text-gray-700">{title}</h3>
+      </div>
+      <div className="h-48 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          {chartType === 'line' ? (
+            <LineChart data={data} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+              <XAxis dataKey="date" tickFormatter={formatXAxis} tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+              <YAxis domain={domain} tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+              <RechartsTooltip 
+                labelFormatter={(label) => `日期: ${label}`}
+                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+              />
+              <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={3} dot={{ r: 3, fill: color, strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 5 }} />
+            </LineChart>
+          ) : (
+            <BarChart data={data} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+              <XAxis dataKey="date" tickFormatter={formatXAxis} tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+              <YAxis domain={domain} tick={{fontSize: 10, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+              <RechartsTooltip 
+                labelFormatter={(label) => `日期: ${label}`}
+                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                cursor={{ fill: `${color}15` }}
+              />
+              <Bar dataKey={dataKey} fill={color} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          )}
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
